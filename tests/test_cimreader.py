@@ -2,7 +2,7 @@
 
 The fixtures are synthetic repositories built by a small writer that lives only in this
 file. It lays out mapping files, index pages, data pages, class definitions and
-instances from python-cim's structure definitions (and, where cimprobe departs from
+instances from python-cim's structure definitions (and, where cimreader departs from
 python-cim, from what known data showed), and the reader is required to hand back
 exactly the namespaces, classes and property values that went in.
 
@@ -24,9 +24,9 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import cimprobe  # noqa: E402
+import cimreader  # noqa: E402
 
-PAGE = cimprobe.DATA_PAGE_SIZE
+PAGE = cimreader.DATA_PAGE_SIZE
 
 T_STRING, T_BOOL, T_UINT8, T_UINT32, T_REF, T_SINT16 = 0x08, 0x0B, 0x11, 0x13, 0x66, 0x02
 
@@ -55,7 +55,7 @@ class Region(object):
 
 
 def slot(t, v):
-    return struct.pack(cimprobe._VALUE_FORMATS[t], v)
+    return struct.pack(cimreader._VALUE_FORMATS[t], v)
 
 
 def qualifiers(entries):
@@ -74,7 +74,7 @@ class Prop(object):
         return bytes([self.t, 0x20 if self.array else 0, 0, 0])
 
     def width(self):
-        return 4 if self.array else struct.calcsize(cimprobe._VALUE_FORMATS[self.t])
+        return 4 if self.array else struct.calcsize(cimreader._VALUE_FORMATS[self.t])
 
 
 class Cls(object):
@@ -173,7 +173,7 @@ def instance(classes, name, values, hash_chars, ts1=0x01DC000000000001, ts2=0x01
     return out
 
 
-def index_page(keys, children, sig=cimprobe.PAGE_TYPE_ACTIVE, root_page=0, logical=0):
+def index_page(keys, children, sig=cimreader.PAGE_TYPE_ACTIVE, root_page=0, logical=0):
     data = bytearray()
     offsets = []
     sdt = []
@@ -202,7 +202,7 @@ def index_page(keys, children, sig=cimprobe.PAGE_TYPE_ACTIVE, root_page=0, logic
 
 def mapping(layout_, version, entries, used=None, phys=None):
     phys = len(entries) if phys is None else phys
-    if layout_ == cimprobe.LAYOUT_WIN7:
+    if layout_ == cimreader.LAYOUT_WIN7:
         out = struct.pack("<6I", 0xABCD, version, version + 1, version, phys, len(entries))
         for i, e in enumerate(entries):
             out += struct.pack("<6I", e, 0, 0, (used or {}).get(i, 0), 0, 0)
@@ -215,16 +215,16 @@ def mapping(layout_, version, entries, used=None, phys=None):
 class Builder(object):
     """Lay objects into data pages and keys into a two-level index, then write the files."""
 
-    def __init__(self, layout_=cimprobe.LAYOUT_WIN7):
+    def __init__(self, layout_=cimreader.LAYOUT_WIN7):
         self.layout = layout_
-        self.hash_chars = 64 if layout_ == cimprobe.LAYOUT_WIN7 else 32
+        self.hash_chars = 64 if layout_ == cimreader.LAYOUT_WIN7 else 32
         self.pages = []              # logical data pages: list of [toc entries, bytearray]
         self.cur = None
         self.keys = []
         self.next_id = 0x100
 
     def h(self, name):
-        f = hashlib.sha256 if self.layout == cimprobe.LAYOUT_WIN7 else hashlib.md5
+        f = hashlib.sha256 if self.layout == cimreader.LAYOUT_WIN7 else hashlib.md5
         return f(name.upper().encode("utf-16-le")).hexdigest().upper()
 
     def _new_page(self):
@@ -281,7 +281,7 @@ class Builder(object):
         mid = len(keys) // 2
         # logical index pages: 0 admin (root_page field), 1 root, 2 left leaf, 3 right leaf
         ipages = [
-            index_page([], [0], sig=cimprobe.PAGE_TYPE_ADMIN, root_page=1),
+            index_page([], [0], sig=cimreader.PAGE_TYPE_ADMIN, root_page=1),
             index_page([keys[mid]], [2, 3], logical=1),
             index_page(keys[:mid], [0] * (mid + 1), logical=2),
             index_page(keys[mid + 1:], [0] * (len(keys) - mid), logical=3),
@@ -368,7 +368,7 @@ INSTANCES = [
 ]
 
 
-def build(folder, layout_=cimprobe.LAYOUT_WIN7, split_mapping=False, extra=()):
+def build(folder, layout_=cimreader.LAYOUT_WIN7, split_mapping=False, extra=()):
     b = Builder(layout_)
     ns = lambda n: "NS_" + b.h(n)                                     # noqa: E731
     for name in SYSTEM_CLASSES:
@@ -399,8 +399,8 @@ def by_name(rows):
 
 
 def test_info_picks_highest_mapping_and_reads_it(win7_repo):
-    with cimprobe.open_repository(win7_repo) as repo:
-        info = cimprobe._info(repo)
+    with cimreader.open_repository(win7_repo) as repo:
+        info = cimreader._info(repo)
     assert info["layout"] == "win7"
     assert info["mapping_files"] == ["MAPPING2.MAP"]
     assert info["mapping_versions"] == {"MAPPING1.MAP": 19, "MAPPING2.MAP": 20}
@@ -410,12 +410,12 @@ def test_info_picks_highest_mapping_and_reads_it(win7_repo):
 
 
 def test_namespaces(win7_repo):
-    with cimprobe.open_repository(win7_repo) as repo:
+    with cimreader.open_repository(win7_repo) as repo:
         assert repo.namespaces() == ["root", "root\\subscription", "root\\default"]
 
 
 def test_classes_include_system_classes(win7_repo):
-    with cimprobe.open_repository(win7_repo) as repo:
+    with cimreader.open_repository(win7_repo) as repo:
         names = repo.class_names(SUB)
     # index (hash) order, system classes first
     assert sorted(names[:len(SYSTEM_CLASSES)]) == sorted(SYSTEM_CLASSES)
@@ -423,7 +423,7 @@ def test_classes_include_system_classes(win7_repo):
 
 
 def test_prefix_lookup_equals_full_walk(win7_repo):
-    with cimprobe.open_repository(win7_repo) as repo:
+    with cimreader.open_repository(win7_repo) as repo:
         every = [k.s for k in repo.iter_keys()]
         assert every == sorted(every)
         for prefix in ("NS_", repo.NS(SUB), "%s/%s" % (repo.NS(SYS), repo.CD()),
@@ -432,8 +432,8 @@ def test_prefix_lookup_equals_full_walk(win7_repo):
 
 
 def test_subscriptions_decode_every_value(win7_repo):
-    with cimprobe.open_repository(win7_repo) as repo:
-        res = cimprobe.subscriptions(repo)
+    with cimreader.open_repository(win7_repo) as repo:
+        res = cimreader.subscriptions(repo)
     assert res["errors"] == []
     sub = by_name(res["namespaces"][SUB])
     assert sorted(r["kind"] for r in sub.values()) == sorted(
@@ -445,7 +445,7 @@ def test_subscriptions_decode_every_value(win7_repo):
                                "Query": "SELECT * FROM __InstanceCreationEvent WITHIN 5",
                                "QueryLanguage": "WQL"}
     assert f["errors"] == []
-    assert f["timestamp_1"] == cimprobe.filetime_to_iso(0x01DC000000000001)
+    assert f["timestamp_1"] == cimreader.filetime_to_iso(0x01DC000000000001)
 
     second = sub["second filter"]
     assert second["properties"]["CreatorSID"] is None and second["properties"]["EventNamespace"] is None
@@ -465,7 +465,7 @@ def test_subscriptions_decode_every_value(win7_repo):
     s = sub["script consumer"]
     assert s["properties"]["ScriptText"] == SCRIPT           # spans three data pages
     assert s["location"]["length"] > 2 * PAGE and s["location"]["pages"] == 3
-    with cimprobe.open_repository(win7_repo) as repo:
+    with cimreader.open_repository(win7_repo) as repo:
         with open(os.path.join(win7_repo, "OBJECTS.DATA"), "rb") as fh:
             for row in sub.values():
                 loc = row["location"]
@@ -485,23 +485,23 @@ def test_subscriptions_decode_every_value(win7_repo):
 
 
 def test_string_encodings():
-    assert cimprobe._wmi_string(b"\x00caf\xe9\x00", 0) == "café"
-    assert cimprobe._wmi_string(b"\x01" + "日x".encode("utf-16-le") + b"\x00\x00", 0) == "日x"
+    assert cimreader._wmi_string(b"\x00caf\xe9\x00", 0) == "café"
+    assert cimreader._wmi_string(b"\x01" + "日x".encode("utf-16-le") + b"\x00\x00", 0) == "日x"
     # a UTF-16 string whose code unit ends in a zero byte, followed by the terminator
-    assert cimprobe._wmi_string(b"\x01" + "Ā".encode("utf-16-le") + b"\x00\x00", 0) == "Ā"
-    with pytest.raises(cimprobe.CimError):
-        cimprobe._wmi_string(b"\x05abc\x00", 0)
-    with pytest.raises(cimprobe.CimError):
-        cimprobe._wmi_string(b"\x00abc", 0)
+    assert cimreader._wmi_string(b"\x01" + "Ā".encode("utf-16-le") + b"\x00\x00", 0) == "Ā"
+    with pytest.raises(cimreader.CimError):
+        cimreader._wmi_string(b"\x05abc\x00", 0)
+    with pytest.raises(cimreader.CimError):
+        cimreader._wmi_string(b"\x00abc", 0)
 
 
 def test_xp_split_mapping(tmp_path):
-    folder = build(str(tmp_path / "Repository" / "FS"), cimprobe.LAYOUT_XP, split_mapping=True)
-    with cimprobe.open_repository(str(tmp_path / "Repository")) as repo:
+    folder = build(str(tmp_path / "Repository" / "FS"), cimreader.LAYOUT_XP, split_mapping=True)
+    with cimreader.open_repository(str(tmp_path / "Repository")) as repo:
         assert repo.layout == "xp"
         assert repo.directory == folder
         assert repo.root_index_page_number == 1          # from the admin page's root field
-        res = cimprobe.subscriptions(repo)
+        res = cimreader.subscriptions(repo)
     sub = by_name(res["namespaces"][SUB])
     assert sub["cmd consumer"]["properties"]["KillTimeout"] == 42
     assert sub["script consumer"]["properties"]["ScriptText"] == SCRIPT
@@ -509,8 +509,8 @@ def test_xp_split_mapping(tmp_path):
 
 def test_dynamic_properties_are_refused_per_instance(tmp_path):
     extra = [(SUB, "__EventFilter", {"Name": "dyn", "_kw": {"dynprops": 2}})]
-    with cimprobe.open_repository(build(str(tmp_path / "r"), extra=extra)) as repo:
-        rows = by_name(cimprobe.subscriptions(repo)["namespaces"][SUB])
+    with cimreader.open_repository(build(str(tmp_path / "r"), extra=extra)) as repo:
+        rows = by_name(cimreader.subscriptions(repo)["namespaces"][SUB])
         bad = [i for i in repo.instances(SUB, "__EventFilter") if i.errors]
     assert len(bad) == 1 and "dynamic properties" in bad[0].errors[0]
     assert FILTER_NAME in rows
@@ -521,8 +521,8 @@ def test_truncated_objects_data_is_an_error(tmp_path):
     p = os.path.join(folder, "OBJECTS.DATA")
     with open(p, "r+b") as f:
         f.truncate(os.path.getsize(p) - 100)
-    with cimprobe.open_repository(folder) as repo:
-        res = cimprobe.subscriptions(repo)
+    with cimreader.open_repository(folder) as repo:
+        res = cimreader.subscriptions(repo)
     flat = res["errors"] + [e for rows in res["namespaces"].values() for r in rows for e in r["errors"]]
     assert flat, "a short page must surface as an error, not as fewer objects"
 
@@ -534,24 +534,24 @@ def test_bad_mapping_footer_is_refused(tmp_path):
     i = data.rfind(struct.pack("<I", 0xDCBA))
     data[i:i + 4] = b"\x00\x00\x00\x00"
     open(p, "wb").write(bytes(data))
-    with pytest.raises(cimprobe.CimError):
-        cimprobe.open_repository(folder)
+    with pytest.raises(cimreader.CimError):
+        cimreader.open_repository(folder)
 
 
 def test_command_line_subscriptions(win7_repo):
     out = io.StringIO()
     with redirect_stdout(out):
-        rc = cimprobe.main(["subscriptions", win7_repo])
+        rc = cimreader.main(["subscriptions", win7_repo])
     assert rc == 0
     res = json.loads(out.getvalue())
     assert len(res["namespaces"][SUB]) == 6 and len(res["namespaces"][DEF]) == 1
 
 
 def test_command_line_reports_unreadable_input(tmp_path, capsys):
-    assert cimprobe.main(["info", str(tmp_path)]) == 1
+    assert cimreader.main(["info", str(tmp_path)]) == 1
     assert "OBJECTS.DATA" in capsys.readouterr().err
 
 
 def test_filetime():
-    assert cimprobe.filetime_to_iso(0) is None
-    assert cimprobe.filetime_to_iso(116444736000000000) == "1970-01-01T00:00:00Z"
+    assert cimreader.filetime_to_iso(0) is None
+    assert cimreader.filetime_to_iso(116444736000000000) == "1970-01-01T00:00:00Z"

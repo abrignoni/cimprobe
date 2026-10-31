@@ -1,12 +1,12 @@
-"""Read one WMI repository with python-cim and with cimprobe, side by side.
+"""Read one WMI repository with python-cim and with cimreader, side by side.
 
 Every instance in every namespace both readers reach. Prints counts, property names, CIM
 type names and difference categories only, never a value. Instances identical in both
 are counted; each remaining python-cim instance is paired with the closest remaining
-cimprobe instance of the same class (most equal properties), and every property that
+cimreader instance of the same class (most equal properties), and every property that
 differs is put in a category.
 
-python-cim is not a dependency of cimprobe. Point the first argument at a checkout of
+python-cim is not a dependency of cimreader. Point the first argument at a checkout of
 mandiant/flare-wmi's python-cim folder (measured with commit b0a5a09) and run this with
 an interpreter that has its requirements (funcy, hexdump, intervaltree,
 vivisect-vstruct-wb); its Qt viewer packages are not needed.
@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.p
 
 import cim  # noqa: E402
 from cim.objects import Tree  # noqa: E402
-import cimprobe  # noqa: E402
+import cimreader  # noqa: E402
 
 logging.disable(logging.CRITICAL)
 UNINIT = "<uninit>"
@@ -83,7 +83,7 @@ def pycim_side(tree):
     return out, names, errors
 
 
-def cimprobe_side(repo):
+def cimreader_side(repo):
     out = collections.defaultdict(list)       # (NS, CLASS) -> [(props, cimtypes, keynames) | None]
     names = repo.namespaces()
     for ns in names:
@@ -91,7 +91,7 @@ def cimprobe_side(repo):
             try:
                 keynames = repo.class_layout(ns, cname).key_names
                 insts = list(repo.instances(ns, cname))
-            except cimprobe.CimError:
+            except cimreader.CimError:
                 continue
             for i in insts:
                 key = (ns.upper(), i.class_name.upper())
@@ -108,7 +108,7 @@ def category(pv, cv, cimtype, pytype):
         return "one side not initialized"
     cimtype = (cimtype or "").upper()
     if "BOOLEAN" in cimtype or cv in ("True", "False"):
-        return "boolean: python-cim %s, cimprobe %s" % (pv if pv in ("True", "False") else "raw " + pytype, cv)
+        return "boolean: python-cim %s, cimreader %s" % (pv if pv in ("True", "False") else "raw " + pytype, cv)
     if isinstance(cv, list) or isinstance(pv, list):
         return "array (%s)" % cimtype
     if pv.lower() == cv.lower():
@@ -116,8 +116,8 @@ def category(pv, cv, cimtype, pytype):
     if any(s in cimtype for s in ("STRING", "REFERENCE", "DATETIME")):
         kind = "ASCII" if cv.isascii() else "non-ASCII"
         if pv.isdigit() and not cv.isdigit():
-            return "%s: python-cim gives a number for a %s cimprobe value" % (cimtype, kind)
-        return "%s: text differs, cimprobe value %s" % (cimtype, kind)
+            return "%s: python-cim gives a number for a %s cimreader value" % (cimtype, kind)
+        return "%s: text differs, cimreader value %s" % (cimtype, kind)
     if pv.lstrip("-").isdigit() and cv.lstrip("-").isdigit():
         return "number differs (%s)" % cimtype
     return "other (%s, python-cim %s)" % (cimtype, pytype)
@@ -132,8 +132,8 @@ def main():
     t0 = time.time()
     pc, pc_names, pc_errors = pycim_side(Tree(cim.CIM(layout, path)))
     t1 = time.time()
-    with cimprobe.open_repository(path) as repo:
-        cp, cp_names = cimprobe_side(repo)
+    with cimreader.open_repository(path) as repo:
+        cp, cp_names = cimreader_side(repo)
     t2 = time.time()
 
     res = collections.Counter()
@@ -144,9 +144,9 @@ def main():
     for key in sorted(set(pc) | set(cp)):
         a, b = pc.get(key, []), cp.get(key, [])
         res["python-cim instances"] += len(a)
-        res["cimprobe instances"] += len(b)
+        res["cimreader instances"] += len(b)
         res["python-cim decode errors"] += a.count(None)
-        res["cimprobe refused"] += b.count(None)
+        res["cimreader refused"] += b.count(None)
         if len(a) != len(b):
             keyed = any(x and x[2] for x in b)
             count_gap["%s; class %s own key" % (
@@ -166,27 +166,27 @@ def main():
             props_a, pytypes = xa
             if not pb:
                 res["python-cim instance unpaired: %s" % (
-                    "cimprobe refused one of this class" if refused_here else "no cimprobe instance left in class")] += 1
+                    "cimreader refused one of this class" if refused_here else "no cimreader instance left in class")] += 1
                 continue
             partner = max(pb, key=lambda xb: sum(1 for n in props_a if xb[0].get(n) == props_a[n]))
             pb.remove(partner)
             res["paired, differing"] += 1
             props_b, cimtypes, _ = partner
             for n in sorted(set(props_a) ^ set(props_b)):
-                name_gaps["%s only in %s" % (n, "python-cim" if n in props_a else "cimprobe")] += 1
+                name_gaps["%s only in %s" % (n, "python-cim" if n in props_a else "cimreader")] += 1
             for n in set(props_a) & set(props_b):
                 if props_a[n] != props_b[n]:
                     c = category(props_a[n], props_b[n], cimtypes.get(n), pytypes.get(n, "uninit"))
                     cats[c] += 1
                     cat_props[c][n] += 1
-        res["cimprobe instance unpaired: %s" % ("python-cim has fewer in class" if len(pc.get(key, [])) < len(cp.get(key, [])) else "other")] += len(pb)
+        res["cimreader instance unpaired: %s" % ("python-cim has fewer in class" if len(pc.get(key, [])) < len(cp.get(key, [])) else "other")] += len(pb)
 
     print(json.dumps({
         "label": label,
         "namespaces python-cim": len(pc_names),
-        "namespaces cimprobe": len(cp_names),
+        "namespaces cimreader": len(cp_names),
         "namespaces only in python-cim": len({n.upper() for n in pc_names} - {n.upper() for n in cp_names}),
-        "namespaces only in cimprobe": len({n.upper() for n in cp_names} - {n.upper() for n in pc_names}),
+        "namespaces only in cimreader": len({n.upper() for n in cp_names} - {n.upper() for n in pc_names}),
         "counts": dict(res),
         "instance count gaps": dict(count_gap),
         "python-cim errors": dict(pc_errors),
@@ -194,7 +194,7 @@ def main():
         "properties per category": {c: dict(v.most_common(8)) for c, v in cat_props.items()},
         "property name gaps": dict(name_gaps.most_common(10)),
         "seconds python-cim": round(t1 - t0, 1),
-        "seconds cimprobe": round(t2 - t1, 1),
+        "seconds cimreader": round(t2 - t1, 1),
     }, indent=1))
 
 

@@ -1,4 +1,4 @@
-"""Count what cimprobe reads in a repository, and what it could not read.
+"""Count what cimreader reads in a repository, and what it could not read.
 
     python tools/census.py <Repository folder> [...]
 
@@ -17,7 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import cimprobe  # noqa: E402
+import cimreader  # noqa: E402
 
 _HEX = re.compile(r"0x[0-9a-f]+|\d+")
 
@@ -25,8 +25,8 @@ _HEX = re.compile(r"0x[0-9a-f]+|\d+")
 def census(path):
     out = {"repository": path}
     try:
-        repo = cimprobe.open_repository(path)
-    except cimprobe.CimError as exc:
+        repo = cimreader.open_repository(path)
+    except cimreader.CimError as exc:
         out["open_error"] = str(exc)
         return out
     with repo:
@@ -36,7 +36,7 @@ def census(path):
         out["root_index_page_signature"] = "0x%04x" % repo.index_page(repo.root_index_page_number).sig
         try:
             keys = list(repo.iter_keys())
-        except cimprobe.CimError as exc:
+        except cimreader.CimError as exc:
             out["index_walk_error"] = str(exc)
             return out
         out["index_keys"] = len(keys)
@@ -46,25 +46,25 @@ def census(path):
         out["index_key_shapes"] = dict(shapes.most_common())
         try:
             names = repo.namespaces()
-        except cimprobe.CimError as exc:
+        except cimreader.CimError as exc:
             out["namespace_walk_error"] = str(exc)
-            names = [cimprobe.ROOT_NAMESPACE_NAME]
+            names = [cimreader.ROOT_NAMESPACE_NAME]
         out["namespaces"] = len(names)
-        named = {repo.NS(n) for n in names + [cimprobe.SYSTEM_NAMESPACE_NAME]}
+        named = {repo.NS(n) for n in names + [cimreader.SYSTEM_NAMESPACE_NAME]}
         index_ns = {k.s.split("/")[0] for k in keys}
         out["namespace_hashes_not_named"] = len(index_ns - named)
         errors = collections.Counter()
         seen = set()
         classes = 0
         decoded = 0
-        for ns in names + [cimprobe.SYSTEM_NAMESPACE_NAME]:
+        for ns in names + [cimreader.SYSTEM_NAMESPACE_NAME]:
             try:
                 cls = repo.class_names(ns)
-            except cimprobe.CimError as exc:
+            except cimreader.CimError as exc:
                 errors["class list: " + _HEX.sub("N", str(exc))] += 1
                 continue
             for name in cls:
-                if ns != cimprobe.SYSTEM_NAMESPACE_NAME:
+                if ns != cimreader.SYSTEM_NAMESPACE_NAME:
                     classes += 1
                 try:
                     for inst in repo.instances(ns, name):
@@ -74,7 +74,7 @@ def census(path):
                                 errors[_HEX.sub("N", e.split(": ", 1)[-1] if e.startswith("property ") else e)] += 1
                         else:
                             decoded += 1
-                except cimprobe.CimError as exc:
+                except cimreader.CimError as exc:
                     errors["class: " + _HEX.sub("N", str(exc))] += 1
         listed = [k for k in keys if k.is_data_reference and k.s.split("/")[1:2] and k.s.split("/")[1].startswith("CI_")]
         out["classes_visible"] = classes
@@ -82,7 +82,7 @@ def census(path):
         out["instances_reached"] = len(seen)
         out["instances_decoded_without_error"] = decoded
         out["errors"] = dict(errors.most_common())
-        subs = cimprobe.subscriptions(repo)
+        subs = cimreader.subscriptions(repo)
         out["subscriptions"] = {
             ns: dict(collections.Counter(r["kind"] for r in rows)) for ns, rows in subs["namespaces"].items()}
         out["subscription_consumer_classes"] = {

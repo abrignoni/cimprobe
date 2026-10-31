@@ -1,23 +1,23 @@
-"""Compare cimprobe's decoded instances with the Get-CimInstance export (oracle.ps1),
+"""Compare cimreader's decoded instances with the Get-CimInstance export (oracle.ps1),
 per namespace, per class, per instance, per property.
 
-    python compare.py <cimprobe folder> <capture folder holding oracle.json and Repository>
+    python compare.py <cimreader folder> <capture folder holding oracle.json and Repository>
 
 Instances are paired by their class's key properties. What is normalised before two
 values are compared, and why:
-- A property the export flags NullValue must be None in cimprobe.
+- A property the export flags NullValue must be None in cimreader.
 - PowerShell unrolls a one-element array returned from a function, so the export writes
   a one-element array as its element; it is wrapped back into a list.
 - The export writes a reference as the referenced instance's key properties, and
-  cimprobe as the stored object path; both become (class, sorted key values), lowercased
+  cimreader as the stored object path; both become (class, sorted key values), lowercased
   class and key names.
-- The export writes a DMTF interval as a .NET TimeSpan string; cimprobe's stored DMTF
+- The export writes a DMTF interval as a .NET TimeSpan string; cimreader's stored DMTF
   interval string is converted to the same form. A DMTF datetime is left as stored.
 - Key property names are matched without regard to case.
 """
 import sys, json, re, collections
 sys.path.insert(0, sys.argv[1])
-import cimprobe as c
+import cimreader as c
 
 cap = sys.argv[2]
 oracle = json.load(open(cap + "/oracle.json", encoding="utf-8-sig"))
@@ -71,7 +71,7 @@ for ns, block in oracle["namespaces"].items():
             mine = list(repo.instances(ns, cls))
         except c.CimError as e:
             problems.append(("class-error", ns, cls, str(e), rows[0]["ClassQualifiers"])); tot["class_error"] += 1; continue
-        tot["oracle_instances"] += len(rows); tot["cimprobe_instances"] += len(mine)
+        tot["oracle_instances"] += len(rows); tot["cimreader_instances"] += len(mine)
         keys = repo.class_layout(ns, cls).key_names
         def okey(r):
             d = {p["Name"].lower(): p for p in r["Properties"]}
@@ -102,7 +102,7 @@ for ns, block in oracle["namespaces"].items():
                     problems.append(("value", ns, cls, okey(r), p["Name"], p["CimType"], p["Flags"], repr(ov)[:120], repr(mv)[:120]))
         for k, i in mm.items():
             problems.append(("extra", ns, cls, k)); tot["extra"] += 1
-    # instances cimprobe sees in classes the oracle reports none for
+    # instances cimreader sees in classes the oracle reports none for
     seen = set(by_class)
     for cls in repo.class_names(ns):
         if cls in seen: continue
