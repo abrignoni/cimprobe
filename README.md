@@ -159,8 +159,45 @@ computes python-cim's figure from cimprobe's output to show it:
 - python-cim decodes the one instance with dynamic properties while ignoring them (5
   properties); cimprobe refuses it.
 
-python-cim itself was not run; this compares cimprobe with the results its authors
+python-cim is not run on these; this compares cimprobe with the results its authors
 recorded. The CI workflow fetches those files at the pinned commit.
+
+**python-cim run side by side.** python-cim at the pinned commit, on Python 3.10, read
+the four known-data captures and ten of the corpus images listed above, every instance in
+every namespace, next to cimprobe (`tools/python_cim_side_by_side.py`, counts and names
+only). The XP image is left out: python-cim opens only `MAPPING1.MAP` to `MAPPING3.MAP`,
+not the split `Repository\FS` layout. Across the fourteen repositories:
+
+| | instances |
+|---|---|
+| cimprobe lists | 34,910 |
+| python-cim lists | 33,426 |
+| identical in both | 27,752 |
+| listed by cimprobe only | 1,484 |
+| refused by cimprobe, returned by python-cim without error | 1,173 |
+| in both, differing | 4,501 |
+
+- The 1,484 sit in classes where python-cim lists fewer instances than cimprobe, 82 to
+  124 per repository. That fits its merge by the leaf class's own key, described above;
+  this run did not test the rule instance by instance.
+- 3,434 boolean values read True in python-cim and False in cimprobe; none differ the
+  other way. python-cim decodes a boolean as `value != 0` on a vstruct `v_uint16`, and
+  vivisect-vstruct-wb 1.0.3 defines no comparison for it, so the test is always true.
+  Where the known-data export covers them (`root\subscription` and `root\default`), it
+  agrees with cimprobe.
+- 3,342 of the differing instances name the built-in property 0x6 `PROVIDER` in
+  python-cim and `provider` in cimprobe (see below).
+- 8 text values differ on the created and modified captures: the subscription objects
+  holding non-ASCII characters. The export agrees with cimprobe.
+- Not explained by this run: 84 ASCII string values (`Name` and `Description`, six in
+  every repository), 146 string-array values (`Text`, all on hexordia_mvs2025_win11) and
+  38 values initialized in one reader only (`QuerySupportLevels`). Which reader is right
+  is not established. Instances that differ are paired with the closest instance of the
+  same class, so some of these may compare two different instances.
+- Whether python-cim's values for the 1,173 instances cimprobe refuses are right is not
+  established.
+
+python-cim took 12 to 26 seconds per repository, cimprobe 1 to 4.
 
 **Synthetic tests.** `tests/test_cimprobe.py` builds repositories with a small writer
 that lives only in the tests and checks that the reader returns what went in: mapping
@@ -169,9 +206,8 @@ lookups, defaults held by the class and by an ancestor, an object spanning three
 both string encodings, and refusals for a short page, a bad mapping footer and dynamic
 properties. That is a second reading of the same description, not evidence.
 
-**Not measured.** python-cim was not run side by side with cimprobe on the
-known-data or corpus repositories. The `xp` layout has no oracle. Windows Vista and 8.0
-repositories have not been read.
+**Not measured.** python-cim was not run on the XP image. The `xp` layout has no oracle.
+Windows Vista and 8.0 repositories have not been read.
 
 ## What known data showed that python-cim does not say
 
