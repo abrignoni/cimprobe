@@ -242,8 +242,8 @@ python-cim reference test included:
 CIMPROBE_PYCIM_REPOS=/path/to/flare-wmi/python-cim/tests/repos python -m pytest tests -q
 ```
 
-The CI workflow covers 3.10 to 3.14 on Linux and Windows and 3.14 on macOS; it has not
-run yet.
+The CI workflow runs 3.10 to 3.14 on Linux, 3.10 and 3.14 on Windows and 3.14 on
+macOS, each with the python-cim reference test required.
 
 ## Licence
 
