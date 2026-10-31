@@ -30,7 +30,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install --upgrade pip pytest
-      # python-cim's test repositories (Apache-2.0), pinned to the commit cimprobe was
+      # python-cim's test repositories (Apache-2.0), pinned to the commit cimreader was
       # ported from; tests/test_python_cim_reference.py reproduces its recorded figures.
       - name: Fetch python-cim's test repositories
         shell: bash
@@ -46,5 +46,5 @@ jobs:
           done
       - run: python -m pytest tests -q -rs
         env:
-          CIMPROBE_PYCIM_REPOS: pycim-repos
-          CIMPROBE_REQUIRE_PYCIM_REPOS: "1"
+          CIMREADER_PYCIM_REPOS: pycim-repos
+          CIMREADER_REQUIRE_PYCIM_REPOS: "1"

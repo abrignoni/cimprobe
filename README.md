@@ -1,8 +1,9 @@
-# cimprobe
+# cimreader
 
 A read-only reader for the Windows WMI CIM repository, the files Windows keeps in
 `C:\Windows\System32\wbem\Repository` (`OBJECTS.DATA`, `INDEX.BTR` and
 `MAPPING1.MAP` to `MAPPING3.MAP`). One file, pure Python, standard library only.
+It was called cimprobe before its first release.
 
 It resolves the active page mapping, walks the index B-tree, and decodes namespaces,
 class definitions and class instances against their class definitions. Its first job is
@@ -12,37 +13,37 @@ listing WMI event subscriptions: `__EventFilter`, the `__EventConsumer` subclass
 mechanism, and the repository is where it lives.
 
 ```python
-import cimprobe
+import cimreader
 
-with cimprobe.open_repository("Repository") as repo:
+with cimreader.open_repository("Repository") as repo:
     for inst in repo.instances("root\\subscription", "CommandLineEventConsumer"):
         print(inst.properties["Name"], inst.properties["CommandLineTemplate"])
 ```
 
 ## Where it comes from
 
-cimprobe is a port of **python-cim**, part of Mandiant's
+cimreader is a port of **python-cim**, part of Mandiant's
 [flare-wmi](https://github.com/mandiant/flare-wmi), written by Willi Ballenthin with
 contributions from davidpany and fhouse. The structures, constants and lookup logic are
 python-cim's, ported from `python-cim/cim/cim.py` and `python-cim/cim/objects.py` at
 commit `b0a5a094ff9ca7d7a1c4fc711dc00c74dec4b6b1` (2018-07-23). python-cim is
-licensed under the Apache License 2.0, and so is cimprobe; see `LICENSE` and `NOTICE`.
+licensed under the Apache License 2.0, and so is cimreader; see `LICENSE` and `NOTICE`.
 
 python-cim was archived in 2018. It needs `vivisect-vstruct-wb`, which is published on
 PyPI only as a source distribution, so it does not install where only wheels are
-allowed. cimprobe replaces the vstruct structure definitions with `struct` reads and
+allowed. cimreader replaces the vstruct structure definitions with `struct` reads and
 drops the other dependencies, so it can be copied into a tool as one file.
 
 ## Command line
 
 ```
-cimprobe info          Repository            # layout, active mapping, page counts
-cimprobe namespaces    Repository            # every namespace below root
-cimprobe classes       Repository root\subscription
-cimprobe instances     Repository root\subscription CommandLineEventConsumer
-cimprobe subscriptions Repository            # root\subscription and root\default, as JSON
-cimprobe subscriptions Repository --namespace root\cimv2
-cimprobe keys          Repository [--prefix NS_...]
+cimreader info          Repository            # layout, active mapping, page counts
+cimreader namespaces    Repository            # every namespace below root
+cimreader classes       Repository root\subscription
+cimreader instances     Repository root\subscription CommandLineEventConsumer
+cimreader subscriptions Repository            # root\subscription and root\default, as JSON
+cimreader subscriptions Repository --namespace root\cimv2
+cimreader keys          Repository [--prefix NS_...]
 ```
 
 The path can be the `Repository` folder or the `wbem` folder that holds it.
@@ -109,16 +110,18 @@ value. Compared instance by instance and property by property:
 | after removal | 40 | 39 | 416 of 416 | 3 |
 
 The one instance in each capture that does not match is `SystemRestoreConfig` in
-`root\default`, which carries dynamic properties; cimprobe refuses it with an error
-rather than decode it (see "Not supported"). cimprobe also reports one
+`root\default`, which carries dynamic properties; cimreader refuses it with an error
+rather than decode it (see "Not supported"). cimreader also reports one
 `__thisNAMESPACE` instance per namespace that the export did not list. After removal,
-cimprobe reports only the three stock objects again: the removed objects are not
-reported as live. In the same captures, the class names cimprobe lists for
+cimreader reports only the three stock objects again: the removed objects are not
+reported as live. In the same captures, the class names cimreader lists for
 `root\subscription` (70) and `root\default` (79) are exactly the classes
 `Get-CimClass` lists.
 
 The scripts that created, changed, removed and exported the known data, and the
 comparison itself, are in `tools/known-data/`. The captures are not in this repository.
+The scripts ran under the old name, so the objects they create are named `cimprobe_kd_*`
+and they write to `C:\cimprobe-test`; those names are kept so they match the captures.
 
 **Exercised on the corpus, with no oracle.** The repositories in eleven disk images from
 the DLEAPP corpus were read in full. Every one opens, its root index page carries the
@@ -149,57 +152,57 @@ those tests record: mapping sizes and the unmapped page list, the index root pag
 47,490 keys its lookup returns for `NS_`, the data page count and the first page's
 table of contents, 55 namespaces, 8,162 classes, the qualifier, property and layout
 property counts, and 1,887 instances. Three differences are deliberate and the test
-computes python-cim's figure from cimprobe's output to show it:
+computes python-cim's figure from cimreader's output to show it:
 - python-cim's lookup visits the child between two matching keys twice, so its 47,490
-  keys are 14,481 distinct ones; cimprobe returns the 14,481, which is what a full
+  keys are 14,481 distinct ones; cimreader returns the 14,481, which is what a full
   index walk finds.
 - python-cim yields one instance per value of the class's own key properties, so the
-  instances of a class without its own key collapse into one. cimprobe yields all
+  instances of a class without its own key collapse into one. cimreader yields all
   1,972 instances the index lists; 1,887 is what remains after python-cim's rule.
 - python-cim decodes the one instance with dynamic properties while ignoring them (5
-  properties); cimprobe refuses it.
+  properties); cimreader refuses it.
 
-python-cim is not run on these; this compares cimprobe with the results its authors
+python-cim is not run on these; this compares cimreader with the results its authors
 recorded. The CI workflow fetches those files at the pinned commit.
 
 **python-cim run side by side.** python-cim at the pinned commit, on Python 3.10, read
 the four known-data captures and ten of the corpus images listed above, every instance in
-every namespace, next to cimprobe (`tools/python_cim_side_by_side.py`, counts and names
+every namespace, next to cimreader (`tools/python_cim_side_by_side.py`, counts and names
 only). The XP image is left out: python-cim opens only `MAPPING1.MAP` to `MAPPING3.MAP`,
 not the split `Repository\FS` layout. Across the fourteen repositories:
 
 | | instances |
 |---|---|
-| cimprobe lists | 34,910 |
+| cimreader lists | 34,910 |
 | python-cim lists | 33,426 |
 | identical in both | 27,752 |
-| listed by cimprobe only | 1,484 |
-| refused by cimprobe, returned by python-cim without error | 1,173 |
+| listed by cimreader only | 1,484 |
+| refused by cimreader, returned by python-cim without error | 1,173 |
 | in both, differing | 4,501 |
 
-- The 1,484 sit in classes where python-cim lists fewer instances than cimprobe, 82 to
+- The 1,484 sit in classes where python-cim lists fewer instances than cimreader, 82 to
   124 per repository. That fits its merge by the leaf class's own key, described above;
   this run did not test the rule instance by instance.
-- 3,434 boolean values read True in python-cim and False in cimprobe; none differ the
+- 3,434 boolean values read True in python-cim and False in cimreader; none differ the
   other way. python-cim decodes a boolean as `value != 0` on a vstruct `v_uint16`, and
   vivisect-vstruct-wb 1.0.3 defines no comparison for it, so the test is always true.
   Where the known-data export covers them (`root\subscription` and `root\default`), it
-  agrees with cimprobe.
+  agrees with cimreader.
 - 3,342 of the differing instances name the built-in property 0x6 `PROVIDER` in
-  python-cim and `provider` in cimprobe (see below).
+  python-cim and `provider` in cimreader (see below).
 - 8 text values differ on the created and modified captures: the subscription objects
-  holding non-ASCII characters. The export agrees with cimprobe.
+  holding non-ASCII characters. The export agrees with cimreader.
 - Not explained by this run: 84 ASCII string values (`Name` and `Description`, six in
   every repository), 146 string-array values (`Text`, all on hexordia_mvs2025_win11) and
   38 values initialized in one reader only (`QuerySupportLevels`). Which reader is right
   is not established. Instances that differ are paired with the closest instance of the
   same class, so some of these may compare two different instances.
-- Whether python-cim's values for the 1,173 instances cimprobe refuses are right is not
+- Whether python-cim's values for the 1,173 instances cimreader refuses are right is not
   established.
 
-python-cim took 12 to 26 seconds per repository, cimprobe 1 to 4.
+python-cim took 12 to 26 seconds per repository, cimreader 1 to 4.
 
-**Synthetic tests.** `tests/test_cimprobe.py` builds repositories with a small writer
+**Synthetic tests.** `tests/test_cimreader.py` builds repositories with a small writer
 that lives only in the tests and checks that the reader returns what went in: mapping
 generation choice, both layouts and the split XP mapping, the index walk against prefix
 lookups, defaults held by the class and by an ancestor, an object spanning three pages,
@@ -242,11 +245,11 @@ Windows Vista and 8.0 repositories have not been read.
   python-cim's labels.
 - **Classes from class providers are not stored.** `root\cimv2` lists 1,312 classes
   live and 862 in the repository; 453 of the live ones are `Win32_Perf*` classes a
-  provider supplies. cimprobe lists what the repository holds.
+  provider supplies. cimreader lists what the repository holds.
 - **A namespace can be in the index without being reachable from root**: on the known
   data, one localized (`ms_409`) namespace holds classes and instances while its
   parent's namespace record is not stored. `tools/census.py` counts such namespaces;
-  cimprobe's namespace walk does not name them.
+  cimreader's namespace walk does not name them.
 - The active `win7` mapping file ends with bytes no structure accounts for: four bytes
   in every `win7` repository measured but one, which has forty, zero in some
   repositories and not in others. They are not read. The split XP mapping files have
@@ -263,7 +266,7 @@ Windows Vista and 8.0 repositories have not been read.
   an instance of a class holding one is refused with an error.
 - **Deleted, superseded or orphaned objects** in free pages or older mapping
   generations, and recovery of any kind.
-- **Instance key hashes.** Like python-cim, cimprobe lists instances by prefix and does
+- **Instance key hashes.** Like python-cim, cimreader lists instances by prefix and does
   not compute the hash an instance is filed under.
 
 ## Tests
@@ -276,7 +279,7 @@ No dependencies beyond pytest. Run locally on Python 3.10, 3.12 and 3.14, with t
 python-cim reference test included:
 
 ```
-CIMPROBE_PYCIM_REPOS=/path/to/flare-wmi/python-cim/tests/repos python -m pytest tests -q
+CIMREADER_PYCIM_REPOS=/path/to/flare-wmi/python-cim/tests/repos python -m pytest tests -q
 ```
 
 The CI workflow runs 3.10 to 3.14 on Linux, 3.10 and 3.14 on Windows and 3.14 on
