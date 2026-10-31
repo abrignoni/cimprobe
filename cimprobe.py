@@ -743,13 +743,7 @@ class Instance(object):
         self.timestamp_2 = None
         self.errors = []
 
-    @property
-    def location(self):
-        try:
-            return {"logical_page": self.key.data_page, "record_id": self.key.data_id,
-                    "length": self.key.data_length}
-        except CimError:
-            return None
+    location = None   # set by Repository.instances from Repository.read_object
 
     def to_dict(self):
         return {
@@ -1062,8 +1056,14 @@ class Repository(object):
     # -------- objects
     def object_bytes(self, key):
         """The bytes of the object a data-reference key names (python-cim get_object_buffer)."""
+        return self.read_object(key)[0]
+
+    def read_object(self, key):
+        """The object's bytes and where they are: its first physical page in OBJECTS.DATA,
+        the byte offset of its first byte in that file, and how many pages it spans."""
         if not key.is_data_reference:
             raise CimError("key is not a data reference: %s" % key)
+        physical = self.data_mapping.physical(key.data_page)
         page = self.data_page(key.data_page)
         toc = _parse_toc(page)
         if toc is None:
@@ -1078,8 +1078,10 @@ class Repository(object):
                 break
         else:
             raise NotFound("data page %d holds no record %d" % (key.data_page, key.data_id))
+        where = {"logical_page": key.data_page, "physical_page": physical, "record_id": key.data_id,
+                 "length": want, "file_offset": physical * DATA_PAGE_SIZE + o, "pages": 1}
         if len(first) >= want:
-            return first[:want]
+            return first[:want], where
         # an object larger than its page continues on the following logical pages
         parts = [first]
         got = len(first)
@@ -1090,7 +1092,8 @@ class Repository(object):
             parts.append(nxt[:take])
             got += take
             i += 1
-        return b"".join(parts)
+        where["pages"] = i
+        return b"".join(parts), where
 
     # -------- names
     def _hash(self, name):
@@ -1167,7 +1170,8 @@ class Repository(object):
         for ref in self.lookup(prefix):
             inst = Instance(namespace, cl.name, ref)
             try:
-                _parse_instance(self.layout, cl, self.object_bytes(ref), inst)
+                buf, inst.location = self.read_object(ref)
+                _parse_instance(self.layout, cl, buf, inst)
             except CimError as exc:
                 inst.errors.append(str(exc))
             yield inst

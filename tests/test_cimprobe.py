@@ -464,7 +464,18 @@ def test_subscriptions_decode_every_value(win7_repo):
 
     s = sub["script consumer"]
     assert s["properties"]["ScriptText"] == SCRIPT           # spans three data pages
-    assert s["location"]["length"] > 2 * PAGE
+    assert s["location"]["length"] > 2 * PAGE and s["location"]["pages"] == 3
+    with cimprobe.open_repository(win7_repo) as repo:
+        with open(os.path.join(win7_repo, "OBJECTS.DATA"), "rb") as fh:
+            for row in sub.values():
+                loc = row["location"]
+                assert loc["file_offset"] // PAGE == loc["physical_page"]
+                key = [k for k in repo.iter_keys() if k.is_data_reference and k.data_id == loc["record_id"]][0]
+                assert loc["physical_page"] == repo.data_mapping.physical(key.data_page)
+                if loc["pages"] == 1:
+                    # the record's bytes sit at file_offset in the file itself
+                    fh.seek(loc["file_offset"])
+                    assert fh.read(loc["length"]) == repo.object_bytes(key)
 
     b = sub['__EventFilter.Name="%s"' % FILTER_NAME]
     assert b["properties"]["Consumer"] == 'CommandLineEventConsumer.Name="cmd consumer"'

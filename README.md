@@ -55,7 +55,9 @@ them. Consumer classes are found by their derivation, not by a list of names, so
 consumer class a product registers is reported too. Each instance carries its
 properties by name (`null` where the instance marks a property as not set), which
 properties took the class default, the class derivation, the two timestamps at the
-head of the record (see below) and the record's location in `OBJECTS.DATA`.
+head of the record (see below) and where the record is: its logical page, the physical
+page the active mapping puts it on, its record id and length, the byte offset of its
+first byte in `OBJECTS.DATA`, and how many pages it spans.
 
 `tools/census.py` prints counts only (namespaces, instances listed against instances
 decoded, errors by kind, subscription objects by kind), for reporting on a repository
@@ -66,19 +68,24 @@ whose contents cannot be shared.
 - **The layout python-cim calls `win7`**: three `MAPPING*.MAP` files, of which the one
   with the highest version is the active mapping, as python-cim does it. Read on
   Windows 7, 8.1, 10, 11 and Server 2012 R2, 2019 and 2022 repositories (below).
-- **The layout python-cim calls `xp`**, including an early Windows XP repository that
-  keeps its mapping in `Repository\FS\OBJECTS.MAP` and `INDEX.MAP` instead of
-  `MAPPING*.MAP`. That variant is not in python-cim; on the one image measured
-  (corpus key `cfreds_hacking_case_winxp`, build 2600, no service pack), each of the
-  two files is exactly one mapping in python-cim's XP structure, both signatures in
-  place and every byte read.
+- **The layout python-cim calls `xp`**, in two forms:
+  - an early Windows XP repository that keeps its mapping in
+    `Repository\FS\OBJECTS.MAP` and `INDEX.MAP` instead of `MAPPING*.MAP`. That form
+    is not in python-cim. On the one image measured (corpus key
+    `cfreds_hacking_case_winxp`, build 2600, no service pack), each of the two files is
+    exactly one mapping in python-cim's XP structure, both signatures in place and every
+    byte read, and the whole repository walks (below).
+  - python-cim's own `xp` form, with `MAPPING*.MAP`. Only one such mapping file has
+    been read, python-cim's `tests/repos/xp/mapping-only` sample, which has no data or
+    index files: it is detected as `xp`, its two mappings parse with both signatures in
+    place, and 1,072 bytes follow them. No objects have been read in this form.
 - **Only the live view**: the objects the active mapping and the index reach. A deleted
   or superseded object left in a free page is not read, so it is never reported as
   live, and it is not recovered either.
 
 ## What is proven, and how
 
-Three tiers, kept apart.
+Four tiers, kept apart.
 
 **Data-proven against Windows itself (known data).** On the Parallels "Windows 11
 arm" VM (Windows 11 build 26200), a harmless set of permanent subscriptions was created
@@ -110,6 +117,9 @@ reported as live. In the same captures, the class names cimprobe lists for
 `root\subscription` (70) and `root\default` (79) are exactly the classes
 `Get-CimClass` lists.
 
+The scripts that created, changed, removed and exported the known data, and the
+comparison itself, are in `tools/known-data/`. The captures are not in this repository.
+
 **Exercised on the corpus, with no oracle.** The repositories in ten disk images from
 the DLEAPP corpus were read in full. Every one opens, its root index page carries the
 active signature, and every subscription object decodes without error. Counts only:
@@ -131,6 +141,26 @@ The instances that do not decode clean are instances whose classes hold embedded
 objects or dynamic properties, the same kinds on every image (see "Not supported");
 none is a subscription object.
 
+**python-cim's own test data.** python-cim's tests assert figures "collected
+empirically" from a Windows 7 repository in its `tests/repos/win7/deleted-instance`.
+`tests/test_python_cim_reference.py` reads that repository and reproduces every figure
+those tests record: mapping sizes and the unmapped page list, the index root page, the
+47,490 keys its lookup returns for `NS_`, the data page count and the first page's
+table of contents, 55 namespaces, 8,162 classes, the qualifier, property and layout
+property counts, and 1,887 instances. Three differences are deliberate and the test
+computes python-cim's figure from cimprobe's output to show it:
+- python-cim's lookup visits the child between two matching keys twice, so its 47,490
+  keys are 14,481 distinct ones; cimprobe returns the 14,481, which is what a full
+  index walk finds.
+- python-cim yields one instance per value of the class's own key properties, so the
+  instances of a class without its own key collapse into one. cimprobe yields all
+  1,972 instances the index lists; 1,887 is what remains after python-cim's rule.
+- python-cim decodes the one instance with dynamic properties while ignoring them (5
+  properties); cimprobe refuses it.
+
+python-cim itself was not run; this compares cimprobe with the results its authors
+recorded. The CI workflow fetches those files at the pinned commit.
+
 **Synthetic tests.** `tests/test_cimprobe.py` builds repositories with a small writer
 that lives only in the tests and checks that the reader returns what went in: mapping
 generation choice, both layouts and the split XP mapping, the index walk against prefix
@@ -138,9 +168,9 @@ lookups, defaults held by the class and by an ancestor, an object spanning three
 both string encodings, and refusals for a short page, a bad mapping footer and dynamic
 properties. That is a second reading of the same description, not evidence.
 
-**Not measured.** cimprobe was not run side by side with python-cim itself, so where
-the two agree is not established beyond the code they share. The `xp` layout has no
-oracle. Windows Vista and 8.0 repositories have not been read.
+**Not measured.** python-cim was not run side by side with cimprobe on the
+known-data or corpus repositories. The `xp` layout has no oracle. Windows Vista and 8.0
+repositories have not been read.
 
 ## What known data showed that python-cim does not say
 
@@ -155,8 +185,9 @@ oracle. Windows Vista and 8.0 repositories have not been read.
   four bytes past the object. All 6,750 class definitions in the known-data repository
   end exactly where the self-counting size puts the end.
 - **The two timestamps at the head of an instance**, which python-cim calls ts1 and ts2
-  without saying what they are, are reported as `timestamp_1` and `timestamp_2`.
-  Neither is when the instance was created or changed:
+  without saying what they are, are reported as `timestamp_1` and `timestamp_2`. On
+  the known data, neither matched when an instance was created or changed (one
+  creation and one change were measured):
   - `timestamp_2` equals the timestamp of the instance's own class definition, on every
     one of 25,413 instances across the known-data repository and the ten corpus
     repositories.
@@ -204,7 +235,15 @@ oracle. Windows Vista and 8.0 repositories have not been read.
 python -m pytest tests -q
 ```
 
-Python 3.10 to 3.14, no dependencies beyond pytest.
+No dependencies beyond pytest. Run locally on Python 3.10, 3.12 and 3.14, with the
+python-cim reference test included:
+
+```
+CIMPROBE_PYCIM_REPOS=/path/to/flare-wmi/python-cim/tests/repos python -m pytest tests -q
+```
+
+The CI workflow covers 3.10 to 3.14 on Linux and Windows and 3.14 on macOS; it has not
+run yet.
 
 ## Licence
 
