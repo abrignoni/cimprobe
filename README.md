@@ -120,7 +120,7 @@ reported as live. In the same captures, the class names cimprobe lists for
 The scripts that created, changed, removed and exported the known data, and the
 comparison itself, are in `tools/known-data/`. The captures are not in this repository.
 
-**Exercised on the corpus, with no oracle.** The repositories in ten disk images from
+**Exercised on the corpus, with no oracle.** The repositories in eleven disk images from
 the DLEAPP corpus were read in full. Every one opens, its root index page carries the
 active signature, and every subscription object decodes without error. Counts only:
 
@@ -133,6 +133,7 @@ active signature, and every subscription object decodes without error. Counts on
 | lonewolf_win10 | win7 | 95 | 2,545 / 2,459 | 3 |
 | szechuan_win10 | win7 | 94 | 2,573 / 2,487 | 3 |
 | pc_mus_001_win11 | win7 | 83 | 2,460 / 2,374 | 3 |
+| hexordia_mvs2025_win11 | win7 | 144 | 2,847 / 2,757 | 3 |
 | szechuan_dc01_server2012r2 | win7 | 80 | 2,455 / 2,372 | 3 |
 | alihadi_threatsim_server2019 | win7 | 106 | 2,664 / 2,579 | 3 |
 | ou_ransomware_server2022 | win7 | 107 | 2,667 / 2,582 | 3 |
@@ -189,7 +190,7 @@ repositories have not been read.
   the known data, neither matched when an instance was created or changed (one
   creation and one change were measured):
   - `timestamp_2` equals the timestamp of the instance's own class definition, on every
-    one of 25,413 instances across the known-data repository and the ten corpus
+    one of 28,254 instances across the known-data repository and the eleven corpus
     repositories.
   - `timestamp_1` on the nine objects created at 13:41:44 UTC on 2026-10-31 read
     2026-10-26T18:08:29.481173Z or .481174Z, five days earlier, and the change made a
