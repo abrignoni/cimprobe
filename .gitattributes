@@ -1,0 +1,3 @@
+# Checkout on Windows converts LF to CRLF by default, which changes a file's bytes and
+# so its hash. A LEAPP core that vendors cimprobe.py records its hash, so keep LF.
+* text=auto eol=lf

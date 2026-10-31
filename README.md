@@ -1,0 +1,212 @@
+# cimprobe
+
+A read-only reader for the Windows WMI CIM repository, the files Windows keeps in
+`C:\Windows\System32\wbem\Repository` (`OBJECTS.DATA`, `INDEX.BTR` and
+`MAPPING1.MAP` to `MAPPING3.MAP`). One file, pure Python, standard library only.
+
+It resolves the active page mapping, walks the index B-tree, and decodes namespaces,
+class definitions and class instances against their class definitions. Its first job is
+listing WMI event subscriptions: `__EventFilter`, the `__EventConsumer` subclasses
+(`CommandLineEventConsumer`, `ActiveScriptEventConsumer` and the rest) and
+`__FilterToConsumerBinding`. A permanent subscription is a common persistence
+mechanism, and the repository is where it lives.
+
+```python
+import cimprobe
+
+with cimprobe.open_repository("Repository") as repo:
+    for inst in repo.instances("root\\subscription", "CommandLineEventConsumer"):
+        print(inst.properties["Name"], inst.properties["CommandLineTemplate"])
+```
+
+## Where it comes from
+
+cimprobe is a port of **python-cim**, part of Mandiant's
+[flare-wmi](https://github.com/mandiant/flare-wmi), written by Willi Ballenthin with
+contributions from davidpany and fhouse. The structures, constants and lookup logic are
+python-cim's, ported from `python-cim/cim/cim.py` and `python-cim/cim/objects.py` at
+commit `b0a5a094ff9ca7d7a1c4fc711dc00c74dec4b6b1` (2018-07-23). python-cim is
+licensed under the Apache License 2.0, and so is cimprobe; see `LICENSE` and `NOTICE`.
+
+python-cim was archived in 2018. It needs `vivisect-vstruct-wb`, which is published on
+PyPI only as a source distribution, so it does not install where only wheels are
+allowed. cimprobe replaces the vstruct structure definitions with `struct` reads and
+drops the other dependencies, so it can be copied into a tool as one file.
+
+## Command line
+
+```
+cimprobe info          Repository            # layout, active mapping, page counts
+cimprobe namespaces    Repository            # every namespace below root
+cimprobe classes       Repository root\subscription
+cimprobe instances     Repository root\subscription CommandLineEventConsumer
+cimprobe subscriptions Repository            # root\subscription and root\default, as JSON
+cimprobe subscriptions Repository --namespace root\cimv2
+cimprobe keys          Repository [--prefix NS_...]
+```
+
+The path can be the `Repository` folder or the `wbem` folder that holds it.
+`instances` and `subscriptions` exit with 2 when any object could not be decoded, so
+"nothing there" and "could not read" are never the same answer.
+
+`subscriptions` reports every instance, in each namespace asked for, of a class that is
+`__EventFilter`, `__EventConsumer` or `__FilterToConsumerBinding` or derives from one of
+them. Consumer classes are found by their derivation, not by a list of names, so a
+consumer class a product registers is reported too. Each instance carries its
+properties by name (`null` where the instance marks a property as not set), which
+properties took the class default, the class derivation, the two timestamps at the
+head of the record (see below) and the record's location in `OBJECTS.DATA`.
+
+`tools/census.py` prints counts only (namespaces, instances listed against instances
+decoded, errors by kind, subscription objects by kind), for reporting on a repository
+whose contents cannot be shared.
+
+## What it reads
+
+- **The layout python-cim calls `win7`**: three `MAPPING*.MAP` files, of which the one
+  with the highest version is the active mapping, as python-cim does it. Read on
+  Windows 7, 8.1, 10, 11 and Server 2012 R2, 2019 and 2022 repositories (below).
+- **The layout python-cim calls `xp`**, including an early Windows XP repository that
+  keeps its mapping in `Repository\FS\OBJECTS.MAP` and `INDEX.MAP` instead of
+  `MAPPING*.MAP`. That variant is not in python-cim; on the one image measured
+  (corpus key `cfreds_hacking_case_winxp`, build 2600, no service pack), each of the
+  two files is exactly one mapping in python-cim's XP structure, both signatures in
+  place and every byte read.
+- **Only the live view**: the objects the active mapping and the index reach. A deleted
+  or superseded object left in a free page is not read, so it is never reported as
+  live, and it is not recovered either.
+
+## What is proven, and how
+
+Three tiers, kept apart.
+
+**Data-proven against Windows itself (known data).** On the Parallels "Windows 11
+arm" VM (Windows 11 build 26200), a harmless set of permanent subscriptions was created
+with `New-CimInstance` on 2026-10-31: in `root\subscription` two filters, a
+`CommandLineEventConsumer` and an `ActiveScriptEventConsumer` whose script is about
+15 KB (larger than one 8 KB page) and two bindings; in `root\default` a filter, a
+`LogFileEventConsumer` and a binding. A filter name and a command line held non-ASCII
+characters, some properties were set and others left at their class default, and the
+command line was changed once a minute later. The repository was copied out of a VSS
+shadow copy four times (before creation, after creation, after the change, after
+removal), each copy checked by SHA-256 on the VM and again on the Mac, and each time
+the live view was exported with `Get-CimInstance -Shallow` for every class in
+`root\subscription` and `root\default`, with each property's name, CIM type, flags and
+value. Compared instance by instance and property by property:
+
+| capture | instances in the export | matched | properties equal | subscription objects |
+|---|---|---|---|---|
+| before creation | 40 | 39 | 416 of 416 | 3 |
+| after creation | 49 | 48 | 498 of 498 | 12 |
+| after the change | 49 | 48 | 498 of 498 | 12 |
+| after removal | 40 | 39 | 416 of 416 | 3 |
+
+The one instance in each capture that does not match is `SystemRestoreConfig` in
+`root\default`, which carries dynamic properties; cimprobe refuses it with an error
+rather than decode it (see "Not supported"). cimprobe also reports one
+`__thisNAMESPACE` instance per namespace that the export did not list. After removal,
+cimprobe reports only the three stock objects again: the removed objects are not
+reported as live. In the same captures, the class names cimprobe lists for
+`root\subscription` (70) and `root\default` (79) are exactly the classes
+`Get-CimClass` lists.
+
+**Exercised on the corpus, with no oracle.** The repositories in ten disk images from
+the DLEAPP corpus were read in full. Every one opens, its root index page carries the
+active signature, and every subscription object decodes without error. Counts only:
+
+| corpus key | layout | namespaces | instances listed / decoded clean | subscription objects |
+|---|---|---|---|---|
+| cfreds_hacking_case_winxp | xp | 26 | 751 / 750 | 6 |
+| cfreds_leakage_win7 | win7 | 47 | 1,945 / 1,861 | 6 |
+| alihadi_challenge3_win81 | win7 | 86 | 2,398 / 2,314 | 3 |
+| af_case2_win10 | win7 | 93 | 2,492 / 2,406 | 3 |
+| lonewolf_win10 | win7 | 95 | 2,545 / 2,459 | 3 |
+| szechuan_win10 | win7 | 94 | 2,573 / 2,487 | 3 |
+| pc_mus_001_win11 | win7 | 83 | 2,460 / 2,374 | 3 |
+| szechuan_dc01_server2012r2 | win7 | 80 | 2,455 / 2,372 | 3 |
+| alihadi_threatsim_server2019 | win7 | 106 | 2,664 / 2,579 | 3 |
+| ou_ransomware_server2022 | win7 | 107 | 2,667 / 2,582 | 3 |
+
+The instances that do not decode clean are instances whose classes hold embedded
+objects or dynamic properties, the same kinds on every image (see "Not supported");
+none is a subscription object.
+
+**Synthetic tests.** `tests/test_cimprobe.py` builds repositories with a small writer
+that lives only in the tests and checks that the reader returns what went in: mapping
+generation choice, both layouts and the split XP mapping, the index walk against prefix
+lookups, defaults held by the class and by an ancestor, an object spanning three pages,
+both string encodings, and refusals for a short page, a bad mapping footer and dynamic
+properties. That is a second reading of the same description, not evidence.
+
+**Not measured.** cimprobe was not run side by side with python-cim itself, so where
+the two agree is not established beyond the code they share. The `xp` layout has no
+oracle. Windows Vista and 8.0 repositories have not been read.
+
+## What known data showed that python-cim does not say
+
+- **Strings.** A string in a data region is one byte, then the text. With the byte at
+  0 the text is one byte per character up to a NUL; with the byte at 1 it is UTF-16LE
+  up to a two-byte NUL. On the known data, a string whose characters all fit Latin-1
+  was stored with 0 (and the export matched it read as Latin-1), and strings holding
+  characters beyond Latin-1 were stored with 1. python-cim skips the byte and decodes
+  UTF-8, which gives the wrong text for any non-ASCII string of either kind.
+- **The method part of a class definition** has a size that counts its own four bytes.
+  python-cim reads it like the property region, whose size does not, and so asks for
+  four bytes past the object. All 6,750 class definitions in the known-data repository
+  end exactly where the self-counting size puts the end.
+- **The two timestamps at the head of an instance**, which python-cim calls ts1 and ts2
+  without saying what they are, are reported as `timestamp_1` and `timestamp_2`.
+  Neither is when the instance was created or changed:
+  - `timestamp_2` equals the timestamp of the instance's own class definition, on every
+    one of 25,413 instances across the known-data repository and the ten corpus
+    repositories.
+  - `timestamp_1` on the nine objects created at 13:41:44 UTC on 2026-10-31 read
+    2026-10-26T18:08:29.481173Z or .481174Z, five days earlier, and the change made a
+    minute later moved it by one 100 ns tick. The stock objects read 2024-04-01. What
+    it counts is not established.
+- **Property type flags.** The second byte of a property type takes the values 0x00,
+  0x20, 0x40 and 0x60. python-cim treats only 0x20 as an array. Reading the 0x20 bit
+  as the array flag instead gave identical output on all 2,475 instances the
+  known-data repository's namespace walk reaches, so the difference is not exercised by any data at hand and
+  python-cim's test is kept.
+- **One built-in property name** (0x6) is `provider` in the live view, on the provider
+  registration classes; python-cim labels it `PROVIDER`. The other built-in names keep
+  python-cim's labels.
+- **Classes from class providers are not stored.** `root\cimv2` lists 1,312 classes
+  live and 862 in the repository; 453 of the live ones are `Win32_Perf*` classes a
+  provider supplies. cimprobe lists what the repository holds.
+- **A namespace can be in the index without being reachable from root**: on the known
+  data, one localized (`ms_409`) namespace holds classes and instances while its
+  parent's namespace record is not stored. `tools/census.py` counts such namespaces;
+  cimprobe's namespace walk does not name them.
+- The active `win7` mapping file ends with bytes no structure accounts for: four bytes
+  in every `win7` repository measured but one, which has forty, zero in some
+  repositories and not in others. They are not read. The split XP mapping files have
+  none.
+
+## Not supported
+
+- **Embedded object properties** (CIM type 13), alone or in arrays: the property is
+  reported as `null` with an error on the instance. No subscription class in any
+  repository measured uses one.
+- **Instances with dynamic properties** (flag 2): python-cim's parser for them is
+  incomplete, so the instance is refused with an error rather than misread.
+- **char16 properties** (CIM type 0x67): python-cim does not know the type's width, so
+  an instance of a class holding one is refused with an error.
+- **Deleted, superseded or orphaned objects** in free pages or older mapping
+  generations, and recovery of any kind.
+- **Instance key hashes.** Like python-cim, cimprobe lists instances by prefix and does
+  not compute the hash an instance is filed under.
+
+## Tests
+
+```
+python -m pytest tests -q
+```
+
+Python 3.10 to 3.14, no dependencies beyond pytest.
+
+## Licence
+
+Apache License 2.0, as python-cim. `NOTICE` names python-cim's authors and the commit
+ported from.
